@@ -1,7 +1,8 @@
-# Base image already carries Python 3.11, PyTorch 2.4.1 and CUDA 12.4, so we
+# Base image already carries Python 3.11, PyTorch 2.7.1 and CUDA 12.8, so we
 # never reinstall torch: matching a CUDA build to a driver by hand is the most
-# common way to lose an afternoon.
-FROM pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime
+# common way to lose an afternoon. 2.7 / CUDA 12.8 is the oldest build with
+# kernels for RTX 50-series (Blackwell, sm_120) GPUs.
+FROM pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime
 
 ENV DEBIAN_FRONTEND=noninteractive
 
