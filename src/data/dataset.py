@@ -19,6 +19,7 @@ a split leaking by accident.
 from __future__ import annotations
 
 import argparse
+import io
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -49,7 +50,7 @@ def cache_dir(size: int) -> Path:
     return WORK / f"train_{size}"
 
 
-def _resize_one(src: str, dst: Path, size: int) -> None:
+def _resize_one(src: str, dst: Path | io.BytesIO, size: int) -> None:
     im = Image.open(src)
     # A JPEG can be decoded at 1/2, 1/4 or 1/8 scale straight from its DCT
     # coefficients. draft() picks the smallest scale that is still at least
@@ -58,7 +59,20 @@ def _resize_one(src: str, dst: Path, size: int) -> None:
     im.draft("RGB", (size, size))
     im = im.convert("RGB")
     im.thumbnail((size, size), Image.LANCZOS)  # long side -> size, aspect kept
-    im.save(dst, quality=92)
+    im.save(dst, format="JPEG", quality=92)
+
+
+def as_cached(path: str | Path, size: int) -> io.BytesIO:
+    """One photograph exactly as `build_cache` would store it, in memory, for images not in the cache.
+
+    The pixel table of the training rows was read from the cache, and the
+    resize and the JPEG round trip both change the grey levels a little, so a
+    test image has to go through the same two steps to give the same input.
+    """
+    buf = io.BytesIO()
+    _resize_one(str(path), buf, size)
+    buf.seek(0)
+    return buf
 
 
 def build_cache(df: pd.DataFrame, size: int, workers: int = 4) -> Path:
@@ -81,7 +95,7 @@ def build_cache(df: pd.DataFrame, size: int, workers: int = 4) -> Path:
 PAD_GREY = 0.5
 
 
-def pixels_of_image(path: str | Path, size: int) -> np.ndarray:
+def pixels_of_image(path: str | Path | io.BytesIO, size: int) -> np.ndarray:
     """One photograph as a flat vector of size * size grey levels in [0, 1].
 
     The long side is scaled to `size` with antialiasing, the short side is

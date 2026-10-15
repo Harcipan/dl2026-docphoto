@@ -12,6 +12,59 @@ By the end of the lab this folder is your project repository, public on
 GitHub, with the lab solved and committed. The project description has the
 rules; the rest of this README has the infrastructure.
 
+## Results
+
+RMSE on the scoreable rows of the lab's validation split (strict unit 4:
+receipts and tables, 380 photographs).
+
+| model | val RMSE | |
+|---|---|---|
+| constant (training mean) | 0.2362 | lab |
+| gradient boosting, 7 features | 0.1732 | lab |
+| **gradient boosting, 7 features + `edge_sharpness`** | **0.1633** | homework 3 |
+| MLP on 64 × 64 pixels, last of 60 epochs | 0.2565 | lab |
+| MLP, best epoch chosen on the validation curve (peeking) | 0.2264 | lab, not a valid score |
+| **MLP, early stopping on a held-out training unit** | **0.2491** | homework 1 |
+
+**Early stopping, done honestly** (`configs/lab3_mlp_es.yaml`). Strict unit 6
+(two-column pages, 284 photographs) is set aside from the training units as a
+stopping set. The model trains on the other 1177 photographs, and the weights
+of the epoch with the lowest stopping-set RMSE are kept (epoch 6). The
+validation unit has no say in the choice. 0.2491 lies between the last epoch and
+the peeked best epoch, and it is still worse than the constant: on 64 px input
+the MLP learns nothing that carries over to unseen pages. The gap to 0.2264 is
+how much choosing the epoch on the validation curve flattered the network.
+[W&B run](https://wandb.ai/kornel-kemecsei-budapesti-m-szaki-s-gazdas-gtudom-nyi-e/dl2026-docphoto/runs/3qvavmms).
+
+**`src/predict.py`** rebuilds the MLP from its checkpoint, repeats the 768 px
+cache's resize and JPEG round trip in memory, and standardises with the stored
+training mean and scale. On twenty training photographs the pixels equal the
+pixel table exactly and the predictions match the training loop's `predict`
+to within 1.2e-7. `tests/test_predict.py` keeps it that way.
+
+**One feature of my own: `edge_sharpness`** (`src/features/handcrafted.py`).
+The baseline's worst leave-one-unit-out errors on the five training units were
+sparse pages, labelled near 1.0 and predicted near 0.3. The pages are small in
+the frame against dark clothing and carry little text, which keeps Laplacian
+variance low and the dark fraction high, while the text is crisp at native
+resolution. The new feature is Laplacian energy divided by gradient energy over
+the strongest 2 % of edges, computed on the 2048 px original. Contrast and the
+amount of text cancel in the ratio, and blur lowers it. It was chosen from ten
+candidates on the training units alone, then measured once on validation
+(`python scripts/baseline_features.py`):
+(Claude went through 10 features it tought would be good and choose the best perforing one)
+
+| | val (unit 4) | grouped 6-fold |
+|---|---|---|
+| 7 features | 0.1732 | 0.1932 |
+| 7 + `edge_sharpness` | 0.1633 | 0.1838 |
+
+A paired bootstrap over the 60 pages puts the 6-fold change at −0.0092
+(95 % interval −0.0151 to −0.0039). Sparse pages gain most (0.290 → 0.261),
+two-column and prose pages lose a little (prose 0.162 → 0.167). It does not
+fix the two other kinds of worst error: sensor noise read as sharpness, and
+motion blur along one direction.
+
 ## Before the lab
 
 Do these at home. In class they cost the hour.

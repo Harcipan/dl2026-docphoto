@@ -9,6 +9,10 @@ each of these sees and, by omission, what none of them does.
 
 Features are computed on the 768 px cache, so every image is at the same
 scale and a sharpness number means the same thing on every row.
+
+An eighth, `edge_sharpness`, is computed on the original photograph instead.
+It is left out of the seven unless asked for (`native=True`), so the lab's
+baseline stays the number it was; scripts/baseline_features.py compares the two.
 """
 from __future__ import annotations
 
@@ -18,7 +22,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from src.data.dataset import cache_dir
+from src.data.dataset import RAW, cache_dir
 
 FEATURE_SIZE = 768
 GRID = 4
@@ -87,21 +91,60 @@ FEATURES = {
 }
 
 
-def extract(image_id: str, size: int = FEATURE_SIZE) -> dict:
+# ------------------------------------------------------------ my own
+
+def edge_sharpness(gray: np.ndarray) -> float:
+    """Sharpness of the ink edges alone: Laplacian energy over gradient energy on the strongest 2 % of edges.
+
+    Laplacian variance mixes three things: how sharp the edges are, how many
+    there are, and how much contrast they have. A sparse page photographed
+    small against dark clothing has few edges and a dark frame, and scores as
+    blurred and underexposed while every letter is crisp; those were the
+    baseline's worst errors. Both energies here grow with the contrast and the
+    number of edges, so their ratio does not, but blur flattens the second
+    derivative faster than the first, so the ratio falls with it. Only the
+    strongest 2 % of gradient pixels count: the ink, not paper texture.
+
+    Computed on the original photograph, not the 768 px cache. At 768 px a
+    9 pt letter is 8 px tall and the downscale has already softened every
+    edge to about a pixel, so a crisp edge and a slightly soft one look alike.
+    """
+    g = gray.astype(np.float64)
+    gx = cv2.Sobel(g, cv2.CV_64F, 1, 0, ksize=3)
+    gy = cv2.Sobel(g, cv2.CV_64F, 0, 1, ksize=3)
+    energy = gx * gx + gy * gy
+    strong = energy > np.percentile(energy, 98)
+    lap = cv2.Laplacian(g, cv2.CV_64F)
+    return float(np.mean(lap[strong] ** 2) / (np.mean(energy[strong]) + 1e-9))
+
+
+NATIVE_FEATURES = {
+    "edge_sharpness": edge_sharpness,
+}
+
+
+def extract(image_id: str, size: int = FEATURE_SIZE, native: bool = False) -> dict:
     gray = cv2.imread(str(cache_dir(size) / f"{image_id}.jpg"), cv2.IMREAD_GRAYSCALE)
     if gray is None:
         raise FileNotFoundError(f"{image_id} not in the {size} px cache")
-    return {name: fn(gray) for name, fn in FEATURES.items()}
+    out = {name: fn(gray) for name, fn in FEATURES.items()}
+    if native:
+        full = cv2.imread(str(RAW / "train" / f"{image_id}.jpg"), cv2.IMREAD_GRAYSCALE)
+        if full is None:
+            raise FileNotFoundError(f"{image_id} not in {RAW / 'train'}")
+        out |= {name: fn(full) for name, fn in NATIVE_FEATURES.items()}
+    return out
 
 
-def feature_table(df: pd.DataFrame, size: int = FEATURE_SIZE, workers: int = 4) -> pd.DataFrame:
-    """One row of features per row of `df`, same index."""
+def feature_table(df: pd.DataFrame, size: int = FEATURE_SIZE, workers: int = 4,
+                  native: bool = False) -> pd.DataFrame:
+    """One row of features per row of `df`, same index. `native` adds NATIVE_FEATURES, from the originals."""
     with ThreadPoolExecutor(workers) as ex:
-        rows = list(ex.map(lambda i: extract(i, size), df["image_id"]))
+        rows = list(ex.map(lambda i: extract(i, size, native), df["image_id"]))
     return pd.DataFrame(rows, index=df.index)
 
 
-def features_of_image(path: str, size: int = FEATURE_SIZE) -> dict:
+def features_of_image(path: str, size: int = FEATURE_SIZE, native: bool = False) -> dict:
     """The same features for an arbitrary image file, for prediction on photographs not in the cache.
 
     Resizes so the long side is `size`, exactly as the cache does, so a number
@@ -113,4 +156,7 @@ def features_of_image(path: str, size: int = FEATURE_SIZE) -> dict:
     h, w = img.shape
     f = size / max(h, w)
     gray = cv2.resize(img, (round(w * f), round(h * f)), interpolation=cv2.INTER_AREA)
-    return {name: fn(gray) for name, fn in FEATURES.items()}
+    out = {name: fn(gray) for name, fn in FEATURES.items()}
+    if native:
+        out |= {name: fn(img) for name, fn in NATIVE_FEATURES.items()}
+    return out

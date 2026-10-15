@@ -44,8 +44,16 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+import torch
 import yaml
+
+from src.data.dataset import as_cached, pixels_of_image
+from src.models.mlp import MLP
+
+# The pixel table of the training rows was read from the 768 px cache.
+CACHE_SIZE = 768
 
 
 def load_model(checkpoint: Path, cfg: dict):
@@ -54,7 +62,21 @@ def load_model(checkpoint: Path, cfg: dict):
     Put the model in eval mode and disable gradients. Return something callable
     that maps one preprocessed image to one float.
     """
-    raise NotImplementedError("TODO: build the model and load the checkpoint")
+    ckpt = torch.load(checkpoint, map_location="cpu")
+    trained = ckpt["config"]
+    if cfg["model"] != trained["model"] or cfg["data"]["pixel_size"] != trained["data"]["pixel_size"]:
+        raise SystemExit(f"{checkpoint} was trained with another model or input size than --config describes")
+    model = MLP(in_dim=ckpt["in_dim"], hidden=list(trained["model"]["hidden"]), dropout=trained["model"]["dropout"])
+    model.load_state_dict(ckpt["state_dict"])
+    model.eval().requires_grad_(False)
+    # The standardiser was fitted on the training rows; it travels with the weights.
+    mean, scale = ckpt["scaler_mean"], ckpt["scaler_scale"]
+
+    def run(pixels: np.ndarray) -> float:
+        x = torch.as_tensor((pixels - mean) / scale, dtype=torch.float32)
+        return float(model(x[None])[0])
+
+    return run
 
 
 def preprocess(image_path: Path, cfg: dict):
@@ -64,12 +86,12 @@ def preprocess(image_path: Path, cfg: dict):
     between training and prediction is the single most common reason a good
     validation score turns into a bad leaderboard score.
     """
-    raise NotImplementedError("TODO: load and preprocess a single image")
+    return pixels_of_image(as_cached(image_path, CACHE_SIZE), cfg["data"]["pixel_size"])
 
 
 def predict_one(model, image_path: Path, cfg: dict) -> float:
     """One image in, one number out."""
-    raise NotImplementedError("TODO: run the model, return a float in [0, 1]")
+    return model(preprocess(image_path, cfg))
 
 
 def main() -> None:

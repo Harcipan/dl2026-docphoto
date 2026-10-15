@@ -1,0 +1,40 @@
+# Lab 3 homework 1: lab3_mlp.yaml with honest early stopping, nothing else changed.
+name: lab3_mlp_es
+seed: 42
+
+data:
+  labels: data/raw/train.csv
+  images: data/raw/train
+  pixel_size: 64           # the photograph is reduced to pixel_size x pixel_size grey levels
+
+split:
+  strategy: by_group
+  group_column: group_strict   # layout-clean units; this is how the test set was cut
+  val_fraction: 0.2
+  seed: 3                       # the split has its own seed: changing the model seed must not move the validation set
+
+model:
+  type: mlp
+  hidden: [256, 64]
+  dropout: 0.3
+
+train:
+  epochs: 60
+  batch_size: 64
+  lr: 0.0003
+  weight_decay: 0.0001
+  log_every: 10
+  # Keep the epoch that scores best on a stopping set carved out of the
+  # training units by build_splits; the validation unit never decides anything.
+  # Seed 8 holds out strict unit 6 (two-column pages, 284 rows). It is the only
+  # training unit whose family survives elsewhere in training (unit 5 has 42
+  # two-column rows); any other unit would remove receipts or tables, which the
+  # validation unit is made of, or the only prose or sparse pages.
+  early_stopping:
+    group_column: group_strict
+    fraction: 0.15
+    seed: 8
+
+wandb:
+  project: dl2026-docphoto
+  tags: [lab3, homework]
