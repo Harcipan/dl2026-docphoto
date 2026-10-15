@@ -1,5 +1,5 @@
 # Lab 3 — a baseline and a first network
-
+.
 This folder is the project template with the plumbing filled in: a data
 loader, a resize cache, a pixel table, seven handcrafted features, a
 gradient-boosting baseline, Weights & Biases logging and the skeleton of a
